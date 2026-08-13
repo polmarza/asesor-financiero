@@ -25,7 +25,8 @@
 | Fase 6 · Confirmación y cierre | ✅ Resumen editable, correcciones → `confirmado`, cierre de la entrevista, descargo visible |
 | Fase 7 · Diagnóstico | ✅ Motor conectado: clasificación de meta, modo del informe, `analisis` con probabilidad y banda |
 | Fase 8 · El plan en cristiano | ✅ Redacción de las 8 secciones a partir del JSON del motor, `planes` con descargo, página `/plan/[token]` |
-| Aplicación | ⬜ En construcción — Fase 9 en adelante |
+| Fase 9 · El panel de Marta | ✅ Login oculto, listado ordenable por banda, ficha de cliente con 3 vistas y 4 visualizaciones |
+| Aplicación | ⬜ En construcción — Fase 10 en adelante |
 
 ---
 

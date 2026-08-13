@@ -22,9 +22,31 @@ import {
   volatilidadCartera,
 } from '@/lib/motor/calculos';
 import { determinarModo, type Ficha } from '@/lib/motor/ficha';
-import type { HorizonteRetirada, PerfilRiesgo } from '@/lib/motor/supuestos';
-import type { ResultadoAnalisis, SituacionActual } from '@/types/analisis';
+import { redondear } from '@/lib/motor/numerico';
+import type { Cartera, HorizonteRetirada, PerfilRiesgo } from '@/lib/motor/supuestos';
+import type { PuntoProyeccion, ResultadoAnalisis, SituacionActual } from '@/types/analisis';
 import { clasificarMeta } from './clasificar-meta';
+
+// Fase 9 · panel: puntos intermedios del plazo para la visualización de área
+// (0 %, 25 %, 50 %, 75 %, 100 %). Misma semilla que el resto del Monte
+// Carlo (src/lib/motor/supuestos.ts): reproducible, no una simulación
+// aparte.
+function calcularProyeccionTemporal(
+  patrimonio: number,
+  aportacionMes: number,
+  pesos: Cartera,
+  plazoAnios: number,
+): PuntoProyeccion[] {
+  const fracciones = [0.25, 0.5, 0.75, 1];
+  return [
+    { anios: 0, p10: patrimonio, p50: patrimonio, p90: patrimonio },
+    ...fracciones.map((f) => {
+      const anios = redondear(plazoAnios * f, 1);
+      const mc = monteCarlo(patrimonio, aportacionMes, pesos, anios);
+      return { anios, p10: mc.p10, p50: mc.p50, p90: mc.p90 };
+    }),
+  ];
+}
 
 // C1: margen para decidir si la aportación actual ya "cuadra" con
 // ingresos−gasto (y por tanto el gasto ya incluye las cuotas de deuda).
@@ -73,7 +95,9 @@ function calcularSituacion(ficha: Ficha): SituacionActual {
       ? deudas.deudas.some((d) => d.interes !== null && d.interes > 7)
       : deudas?.tipo === 'solo_flag'
         ? deudas.hayInteresAlto
-        : null;
+        : deudas?.tipo === 'ninguna'
+          ? false
+          : null;
 
   return {
     flujoLibreMes,
@@ -103,6 +127,7 @@ function resultadoSinPropuesta(
     aportacion: null,
     proyeccion: null,
     monteCarlo: null,
+    proyeccionTemporal: null,
     nota,
     viable: null,
   };
@@ -188,6 +213,8 @@ export function ejecutarDiagnostico(ficha: Ficha): ResultadoAnalisis {
     propuesta: aportacionPropuestaEur,
   };
 
+  const proyeccionTemporal = calcularProyeccionTemporal(patrimonio, aportacionPropuestaEur, pesos, plazo);
+
   let proyeccion = null;
   let monteCarloResultado = null;
   // R4 · se dispara si, al ritmo propuesto, no se llega a la meta dentro del
@@ -232,6 +259,7 @@ export function ejecutarDiagnostico(ficha: Ficha): ResultadoAnalisis {
     aportacion,
     proyeccion,
     monteCarlo: monteCarloResultado,
+    proyeccionTemporal,
     nota:
       tipoMeta === 'mixta' ? 'Meta mixta: la parte de negocio, si la hay, queda pendiente de tratar aparte.' : null,
     viable,

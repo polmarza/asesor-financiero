@@ -39,6 +39,17 @@ export interface ResultadoMonteCarlo {
   banda: BandaProbabilidad;
 }
 
+// Fase 9 · panel: puntos intermedios del Monte Carlo (0, 25, 50, 75, 100 %
+// del plazo) para la visualización de área p10/p50/p90 en el tiempo
+// (docs/design-system.md). Misma semilla que el resultado final: es
+// reproducible, no una segunda simulación independiente.
+export interface PuntoProyeccion {
+  anios: number;
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
 // Forma de `analisis.resultado`. Todo lo que aparece en el plan (Fase 8) tiene
 // que poder rastrearse hasta aquí (docs/prd.md, «Trazabilidad»).
 export interface ResultadoAnalisis {
@@ -52,6 +63,7 @@ export interface ResultadoAnalisis {
   aportacion: Aportacion | null;
   proyeccion: Proyeccion | null;
   monteCarlo: ResultadoMonteCarlo | null;
+  proyeccionTemporal: PuntoProyeccion[] | null;
   // Casos que cierran el diagnóstico sin propuesta de cartera: R6 (renta de
   // negocio propio, no se convierte), R8 (flujo libre ≤ 0, modo
   // estabilización) o meta mixta con parte no convertible.
