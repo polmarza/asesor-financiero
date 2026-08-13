@@ -46,3 +46,23 @@ entra un lead nuevo.
 Hoy el correo se acepta sin comprobar. Verificarlo mejoraría la calidad de los
 leads, a cambio de meter fricción en mitad de una conversación que presume
 justamente de no tenerla. Medir antes de decidir.
+
+### [MEJORA-04] Capturar explícitamente si el gasto incluye las cuotas de deuda
+**Área:** Backend / Criterio
+**Prioridad estimada:** Media
+**Origen:** Verificación de la Fase 7 (diagnóstico)
+
+El caso C1 de `docs/criterio/instrucciones-motor.md` («¿gasto_total_mes
+incluye las cuotas de deuda?») se resuelve hoy comparando
+`aportacion_mensual_actual` con `ingresos − gasto`: si no coinciden, se asume
+que el gasto NO incluye las cuotas (R9, prudente) y se restan aparte. En la
+práctica esto puede restar dos veces una cuota que el cliente ya dijo que
+tenía metida en su gasto total (como pasó en la verificación con la ficha de
+Laura), simplemente porque su aportación mensual no coincide con el
+remanente — algo habitual, ya que lo que aparta cada mes no tiene por qué
+casar con lo que le sobra.
+
+La plantilla de entrevista no pregunta esto de forma explícita. Añadir una
+pregunta corta en el bloque 3 o 6 («¿ese gasto ya cuenta la cuota de la
+hipoteca/deudas, o va aparte?») y una clave nueva en la ficha eliminaría la
+ambigüedad en el origen, en vez de heredarla al motor.

@@ -21,7 +21,11 @@
 | Fase 2 · Base de datos | ✅ Proyecto Supabase (región europea), esquema aplicado, RLS activo, clientes conectados |
 | Fase 3 · Landing y entrada al diagnóstico | ✅ Landing, consentimiento, entrevista con token y límite por IP/hora |
 | Fase 4 · La entrevista que habla | ✅ Chat contra la API de Anthropic, nombre y correo crean el cliente, mensajes persistidos |
-| Aplicación | ⬜ En construcción — Fase 5 en adelante |
+| Fase 5 · La entrevista que escucha | ✅ `guardar_dato` turno a turno, etiquetas correctas, barra de progreso — variante 1 del guion sale `estimado` |
+| Fase 6 · Confirmación y cierre | ✅ Resumen editable, correcciones → `confirmado`, cierre de la entrevista, descargo visible |
+| Fase 7 · Diagnóstico | ✅ Motor conectado: clasificación de meta, modo del informe, `analisis` con probabilidad y banda |
+| Fase 8 · El plan en cristiano | ✅ Redacción de las 8 secciones a partir del JSON del motor, `planes` con descargo, página `/plan/[token]` |
+| Aplicación | ⬜ En construcción — Fase 9 en adelante |
 
 ---
 

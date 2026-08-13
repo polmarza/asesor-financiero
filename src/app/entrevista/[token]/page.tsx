@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { crearClienteServidor } from '@/lib/supabase/server';
+import { obtenerFichaEntrevista } from '@/lib/fichas';
+import { calcularProgreso } from '@/types/ficha';
 import type { Entrevista } from '@/types/entrevista';
 import type { Mensaje } from '@/types/mensaje';
 import { Chat } from './chat';
@@ -67,5 +69,13 @@ export default async function PaginaEntrevista({
     .order('id', { ascending: true })
     .returns<Mensaje[]>();
 
-  return <Chat token={entrevista.token} mensajesIniciales={mensajes ?? []} />;
+  const ficha = await obtenerFichaEntrevista(supabase, entrevista.id);
+
+  return (
+    <Chat
+      token={entrevista.token}
+      mensajesIniciales={mensajes ?? []}
+      progresoInicial={calcularProgreso(ficha?.datos ?? null)}
+    />
+  );
 }

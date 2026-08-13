@@ -1,8 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { crearClienteServidor } from '@/lib/supabase/server';
-import { PROMPT_SISTEMA_ENTREVISTA } from '@/lib/claude/prompt-entrevista';
-import { HERRAMIENTA_GUARDAR_CLIENTE } from '@/lib/claude/herramientas';
+import { construirPromptSistema } from '@/lib/claude/prompt-entrevista';
+import { HERRAMIENTA_GUARDAR_CLIENTE, HERRAMIENTA_GUARDAR_DATO } from '@/lib/claude/herramientas';
 import { guardarClienteDeEntrevista } from '@/lib/clientes';
+import { guardarDatoEnFicha, obtenerFichaEntrevista, construirEstadoFicha } from '@/lib/fichas';
+import { calcularProgreso, type DatosFicha } from '@/types/ficha';
 import type { Mensaje } from '@/types/mensaje';
 
 // Tope técnico de mensajes por entrevista (cliente + agente). La plantilla ya
@@ -10,6 +12,9 @@ import type { Mensaje } from '@/types/mensaje';
 // plantilla-entrevista.md); esto es solo la red de seguridad si no lo hace.
 const MAX_MENSAJES = 40;
 const LONGITUD_MAXIMA_MENSAJE = 2000;
+// Ida y vuelta con herramientas: nombre+correo y varios datos pueden resolverse
+// en el mismo turno. Techo de seguridad para no encadenar llamadas sin fin.
+const MAX_ITERACIONES_HERRAMIENTAS = 6;
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -24,9 +29,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
   const { data: entrevista } = await supabase
     .from('entrevistas')
-    .select('id, expira_en')
+    .select('id, cliente_id, expira_en')
     .eq('token', token)
-    .maybeSingle<{ id: string; expira_en: string }>();
+    .maybeSingle<{ id: string; cliente_id: string | null; expira_en: string }>();
 
   if (!entrevista) {
     return Response.json({ error: 'Entrevista no encontrada.' }, { status: 404 });
@@ -65,51 +70,127 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
   const anthropic = new Anthropic();
 
+  // Cliente aún puede no existir (todavía no dio nombre+correo): guardar_dato
+  // solo se puede ejecutar una vez hay cliente_id. Se rellena en el bucle si
+  // guardar_cliente se llama en este mismo turno.
+  let clienteId = entrevista.cliente_id;
+  let clienteCreado = false;
+  let datosFicha: DatosFicha | null = clienteId
+    ? ((await obtenerFichaEntrevista(supabase, entrevista.id))?.datos ?? null)
+    : null;
+
   let respuesta = await anthropic.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 1024,
-    system: PROMPT_SISTEMA_ENTREVISTA,
-    tools: [HERRAMIENTA_GUARDAR_CLIENTE],
+    system: construirPromptSistema(construirEstadoFicha(datosFicha)),
+    tools: [HERRAMIENTA_GUARDAR_CLIENTE, HERRAMIENTA_GUARDAR_DATO],
     messages: mensajesParaClaude,
   });
 
-  let clienteCreado = false;
+  let iteraciones = 0;
+  while (respuesta.stop_reason === 'tool_use' && iteraciones < MAX_ITERACIONES_HERRAMIENTAS) {
+    iteraciones += 1;
+    const bloquesHerramienta = respuesta.content.filter((b) => b.type === 'tool_use');
+    if (bloquesHerramienta.length === 0) break;
 
-  if (respuesta.stop_reason === 'tool_use') {
-    const bloqueHerramienta = respuesta.content.find((b) => b.type === 'tool_use');
+    const resultados: Anthropic.ToolResultBlockParam[] = [];
 
-    if (bloqueHerramienta && bloqueHerramienta.type === 'tool_use') {
-      const entrada = bloqueHerramienta.input as { nombre?: string; email?: string };
-      let resultadoHerramienta: string;
+    for (const bloque of bloquesHerramienta) {
+      if (bloque.type !== 'tool_use') continue;
 
-      if (entrada.nombre && entrada.email) {
-        try {
-          await guardarClienteDeEntrevista(supabase, entrevista.id, entrada.nombre, entrada.email);
-          clienteCreado = true;
-          resultadoHerramienta = 'Cliente guardado correctamente.';
-        } catch {
-          resultadoHerramienta = 'No se pudo guardar el cliente, sigue la conversación con normalidad.';
+      if (bloque.name === 'guardar_cliente') {
+        const entrada = bloque.input as { nombre?: string; email?: string };
+        if (entrada.nombre && entrada.email) {
+          try {
+            const resultado = await guardarClienteDeEntrevista(
+              supabase,
+              entrevista.id,
+              entrada.nombre,
+              entrada.email,
+            );
+            clienteId = resultado.clienteId;
+            clienteCreado = true;
+            resultados.push({
+              type: 'tool_result',
+              tool_use_id: bloque.id,
+              content: 'Cliente guardado correctamente.',
+            });
+          } catch {
+            resultados.push({
+              type: 'tool_result',
+              tool_use_id: bloque.id,
+              content: 'No se pudo guardar el cliente, sigue la conversación con normalidad.',
+            });
+          }
+        } else {
+          resultados.push({
+            type: 'tool_result',
+            tool_use_id: bloque.id,
+            content: 'Faltan nombre o email, pídelos de nuevo.',
+          });
         }
-      } else {
-        resultadoHerramienta = 'Faltan nombre o email, pídelos de nuevo.';
+        continue;
       }
 
-      mensajesParaClaude.push({ role: 'assistant', content: respuesta.content });
-      mensajesParaClaude.push({
-        role: 'user',
-        content: [
-          { type: 'tool_result', tool_use_id: bloqueHerramienta.id, content: resultadoHerramienta },
-        ],
-      });
+      if (bloque.name === 'guardar_dato') {
+        if (!clienteId) {
+          resultados.push({
+            type: 'tool_result',
+            tool_use_id: bloque.id,
+            content: 'Todavía no hay cliente creado: llama primero a guardar_cliente.',
+            is_error: true,
+          });
+          continue;
+        }
+        const entrada = bloque.input as {
+          clave?: string;
+          valor?: unknown;
+          etiqueta?: string;
+          cita?: string;
+          supuesto?: string;
+        };
+        const resultado = await guardarDatoEnFicha(
+          supabase,
+          entrevista.id,
+          clienteId,
+          entrada.clave ?? '',
+          entrada.valor,
+          entrada.etiqueta ?? '',
+          entrada.cita,
+          entrada.supuesto,
+        );
+        if (resultado.ok) {
+          datosFicha = resultado.datos;
+          resultados.push({ type: 'tool_result', tool_use_id: bloque.id, content: 'Guardado.' });
+        } else {
+          resultados.push({
+            type: 'tool_result',
+            tool_use_id: bloque.id,
+            content: resultado.error,
+            is_error: true,
+          });
+        }
+        continue;
+      }
 
-      respuesta = await anthropic.messages.create({
-        model: 'claude-sonnet-5',
-        max_tokens: 1024,
-        system: PROMPT_SISTEMA_ENTREVISTA,
-        tools: [HERRAMIENTA_GUARDAR_CLIENTE],
-        messages: mensajesParaClaude,
+      resultados.push({
+        type: 'tool_result',
+        tool_use_id: bloque.id,
+        content: 'Herramienta desconocida.',
+        is_error: true,
       });
     }
+
+    mensajesParaClaude.push({ role: 'assistant', content: respuesta.content });
+    mensajesParaClaude.push({ role: 'user', content: resultados });
+
+    respuesta = await anthropic.messages.create({
+      model: 'claude-sonnet-5',
+      max_tokens: 1024,
+      system: construirPromptSistema(construirEstadoFicha(datosFicha)),
+      tools: [HERRAMIENTA_GUARDAR_CLIENTE, HERRAMIENTA_GUARDAR_DATO],
+      messages: mensajesParaClaude,
+    });
   }
 
   const textoRespuesta = respuesta.content
@@ -124,5 +205,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     .from('mensajes')
     .insert({ entrevista_id: entrevista.id, rol: 'agente', contenido: textoFinal });
 
-  return Response.json({ respuesta: textoFinal, clienteCreado });
+  return Response.json({
+    respuesta: textoFinal,
+    clienteCreado,
+    progreso: calcularProgreso(datosFicha),
+  });
 }
